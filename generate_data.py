@@ -1,60 +1,37 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import json
 import torch
 import argparse
 from dotenv import load_dotenv
 import os
 
-def load_model(model_id):
-    tokenizer = AutoTokenizer.from_pretrained(model_id, token=os.getenv("HF_TOKEN"), cache_dir=os.getenv("HF_CACHE_DIR"))
-    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16, device_map="auto", token=os.getenv("HF_TOKEN"), cache_dir=os.getenv("HF_CACHE_DIR"))
-
-    return model, tokenizer
-
-
-def summarize(article, model, tokenizer, max_length=64):
-    prompt = f"Write a short summary of this article:\n\n{article}"
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
-
-    with torch.no_grad():
-        outputs = model.generate(
-            inputs["input_ids"], max_new_tokens=max_length, num_return_sequences=1
-        )
-
-    summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    summary = summary.replace(prompt, "").strip()
-    return summary
-
-
 if __name__ == "__main__":
     load_dotenv()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-id", type=str, required=True)
-    parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args()
-
     dataset = load_dataset(
         "xsum",
         split="train",
-        cache_dir=os.getenv("HF_CACHE_DIR"),
-        trust_remote_code=True
-        )
-
-    model, tokenizer = load_model(args.model_id)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-    model = model.to(device)
+        cache_dir="/scratch/user/dylanharden3/AITextDetector/dataset",
+        trust_remote_code=True,
+    )
     pairs = []
-
-    for example in dataset.select(range(2)):
+    summarizer = pipeline(task="text-generation", model=args.model_id, device=0)
+    for example in dataset:
         article = example["document"]
         human_summary = example["summary"]
-
+        prompt = f"Write a super short summary of this article:\n\n{article}"
         try:
-            ai_summary = summarize(article, model, tokenizer)
-
+            ai_summary = summarizer(
+                [{"role": "user", "content": prompt}],
+                do_sample=False,
+                temperature=None,
+                top_p=None,
+                max_new_tokens=32,
+                pad_token_id=summarizer.tokenizer.eos_token_id,
+            )[0]["generated_text"][1]["content"]
             pairs.append(
                 {
                     "article": article,
@@ -63,9 +40,10 @@ if __name__ == "__main__":
                 }
             )
         except Exception as e:
-            pass
-
-    with open(args.output, "w") as f:
+            print(e)
+    outname = args.model_id + ".json"
+    if "/" in outname:
+        outname = outname[outname.index("/") + 1 :]
+    with open(outname, "w") as f:
         json.dump(pairs, f, indent=4)
-
-    print(f"Summaries saved to {args.output}")
+    print(f"Wrote {len(dataset)} summaries to {outname}")
