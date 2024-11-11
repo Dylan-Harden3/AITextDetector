@@ -25,7 +25,6 @@ def log_rank(token_ids, logits):
     sorted_indices = torch.argsort(logits, dim=-1, descending=True)
 
     matches = (sorted_indices == token_ids.unsqueeze(-1)).nonzero()
-
     ranks = matches[:, -1]
 
     log_ranks = torch.log(ranks.float() + 1)
