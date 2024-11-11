@@ -3,3 +3,7 @@ venv
 .env
 __pycache__
 test.py
+models
+dataset
+*.json
+*.log

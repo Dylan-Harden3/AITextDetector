@@ -1,48 +1,45 @@
 import torch
 import torch.nn.functional as F
+from sklearn.metrics import roc_curve, precision_recall_curve, auc
+import matplotlib.pyplot as plt
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-def log_likelihood(model, tokenizer, text):
-    inputs = tokenizer(text, return_tensors="pt").to(model.device)
-    input_ids = inputs["input_ids"]
+def log_likelihood(token_ids, logits):
+    logits = logits.view(-1, logits.shape[-1])
+    token_ids = token_ids.view(-1)
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
+    log_probs = F.log_softmax(logits, dim=-1)
+    actual_token_probs = log_probs.gather(dim=-1, index=token_ids.unsqueeze(-1)).squeeze(-1)
+    return actual_token_probs.mean().item()
 
-    logits = logits.view(-1, logits.shape[-1])[:-1] # chop off the next token prediction
-    input_ids = input_ids.view(-1)[1:] # chop off bos token from labels
-    N = input_ids.shape[0]
-
-    probs = F.softmax(logits, dim=-1)
-
-    actual_token_probs = probs.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
-
-    return actual_token_probs.prod().item() ** (-1/N)
-
-
-def average_rank(model, tokenizer, text, log=False):
-    inputs = tokenizer(text, return_tensors="pt").to(model.device)
-    input_ids = inputs["input_ids"]
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-
-    logits = logits.view(-1, logits.shape[-1])[:-1] # chop off the next token prediction
-    input_ids = input_ids.view(-1)[1:] # chop off bos token from labels
-    
+def rank(token_ids, logits):
     sorted_indices = torch.argsort(logits, dim=-1, descending=True)
     
-    ranks = []
-    for i in range(len(input_ids)):
-        target_id = input_ids[i]
-        rank = (sorted_indices[i] == target_id).nonzero().item() + 1
-        ranks.append(rank)
-    
-    ranks = torch.tensor(ranks)
+    matches = (sorted_indices == token_ids.unsqueeze(-1)).nonzero()
+    ranks = matches[:, -1]
+    ranks = ranks.float() + 1
 
-    if log:
-        ranks = torch.log(ranks.float())
-    average_rank = ranks.float().mean().item()
-    
-    return average_rank
+    return -ranks.mean().item()
+
+def log_rank(token_ids, logits):
+    sorted_indices = torch.argsort(logits, dim=-1, descending=True)
+
+    matches = (sorted_indices == token_ids.unsqueeze(-1)).nonzero()
+
+    ranks = matches[:, -1]
+
+    log_ranks = torch.log(ranks.float() + 1)
+
+    return -log_ranks.mean().item()
+
+def load_model(model_id, cache=None, token=None):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=cache, token=token)
+    model = AutoModelForCausalLM.from_pretrained(model_id, cache_dir=cache, token=token).to(device)
+
+    return model, tokenizer
+
+def roc(human_preds, ai_preds):
+    fpr, tpr, _ = roc_curve([0] * len(human_preds) + [1] * len(ai_preds), human_preds + ai_preds)
+    auc_roc = auc(fpr, tpr)
+    return fpr.tolist(), tpr.tolist(), float(auc_roc)
