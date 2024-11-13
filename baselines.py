@@ -1,5 +1,3 @@
-from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import json
 import torch
 import argparse
@@ -8,51 +6,61 @@ import os
 from utils import log_likelihood, rank, log_rank, load_model, roc
 
 
-
 def detect(args):
     model, tokenizer = load_model(args.model, args.cache, os.getenv("HF_TOKEN"))
     with open(args.dataset_file, "r") as f:
         dataset = json.load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    method_funcs = {
-            "ll": log_likelihood,
-            "rank": rank,
-            "logrank": log_rank
-            }
 
-    for method in ["ll", "rank", "logrank"]:
+    method_funcs = {"ll": log_likelihood, "rank": rank, "logrank": log_rank}
+    methods = ["ll", "rank", "logrank"]
+
+    results = {}
+    results["model"] = args.model
+    results["dataset"] = args.dataset_file
+
+    for method in methods:
+        print(f"starting {method}")
         human_text_preds = []
         ai_text_preds = []
-        
-        predict = method_funcs[method]
-        
+
+        criterion = method_funcs[method]
+
         for human_text, ai_text in dataset:
-            tokens = tokenizer(human_text, return_tensors="pt", padding=True, return_token_type_ids=False).to(device)
-            token_ids = tokens.input_ids[:, 1:]
-        
-            with torch.no_grad():
-                logits = model(**tokens).logits[:, :-1]
-                pred_human = predict(token_ids, logits)
-
-            tokens = tokenizer(human_text, return_tensors="pt", padding=True, return_token_type_ids=False).to(device)
+            tokens = tokenizer(
+                human_text,
+                return_tensors="pt",
+                padding=True,
+                return_token_type_ids=False,
+            ).to(device)
             token_ids = tokens.input_ids[:, 1:]
 
             with torch.no_grad():
                 logits = model(**tokens).logits[:, :-1]
-                pred_ai = predict(token_ids, logits)
+                pred_human = criterion(token_ids, logits)
+
+            tokens = tokenizer(
+                ai_text, return_tensors="pt", padding=True, return_token_type_ids=False
+            ).to(device)
+            token_ids = tokens.input_ids[:, 1:]
+
+            with torch.no_grad():
+                logits = model(**tokens).logits[:, :-1]
+                pred_ai = criterion(token_ids, logits)
 
             human_text_preds.append(pred_human)
             ai_text_preds.append(pred_ai)
-        
+
         fpr, tpr, roc_auc = roc(human_text_preds, ai_text_preds)
         print(f"{method} {roc_auc}")
-        res = {
-            "method": method,
-            "dataset": args.dataset_file,
-            "predictions": {'human': human_text_preds, 'ai': ai_text_preds}
+        results[method] = {
+            "predictions": {"human": human_text_preds, "ai": ai_text_preds},
+            "results": [fpr, tpr, roc_auc],
         }
-            
+
+    with open(args.output_file, "w") as f:
+        json.dump(results, f, indent=4)
+
 
 if __name__ == "__main__":
     load_dotenv()

@@ -40,7 +40,10 @@ def load_model(model_id, cache=None, token=None):
             model_id, {"padding_side": "right"}, cache_dir=cache, token=token
         )
     else:
-        tokenizer = GemmaTokenizerFast(vocab_file="/scratch/user/dylanharden3/AITextDetector/dataset/models--google--gemma-2-9b/snapshots/33c193028431c2fde6c6e51f29e6f17b60cbfac6/tokenizer.model", tokenizer_file="/scratch/user/dylanharden3/AITextDetector/dataset/models--google--gemma-2-9b/snapshots/33c193028431c2fde6c6e51f29e6f17b60cbfac6/tokenizer.json")
+        tokenizer = GemmaTokenizerFast(
+            vocab_file="/scratch/user/dylanharden3/AITextDetector/dataset/models--google--gemma-2-9b/snapshots/33c193028431c2fde6c6e51f29e6f17b60cbfac6/tokenizer.model",
+            tokenizer_file="/scratch/user/dylanharden3/AITextDetector/dataset/models--google--gemma-2-9b/snapshots/33c193028431c2fde6c6e51f29e6f17b60cbfac6/tokenizer.json",
+        )
     model = AutoModelForCausalLM.from_pretrained(
         model_id, cache_dir=cache, token=token
     ).to(device)
