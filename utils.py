@@ -1,7 +1,12 @@
 import torch
 import torch.nn.functional as F
 from sklearn.metrics import roc_curve, auc
-from transformers import AutoTokenizer, AutoModelForCausalLM, GemmaTokenizerFast
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    GemmaTokenizerFast,
+)
 
 
 def log_likelihood(token_ids, logits):
@@ -50,6 +55,16 @@ def load_model(model_id, cache=None, token=None):
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    return model, tokenizer
+
+
+def load_mask_model(model_id, cache=None, token=None):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForSeq2SeqLM.from_pretrained(
+        model_id, cache_dir=cache, token=token
+    ).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=cache, token=token)
 
     return model, tokenizer
 
